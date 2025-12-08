@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ZamanX AI - Future Intelligence</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* Custom scrollbar */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #050505; 
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #22d3ee; 
+        border-radius: 4px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #06b6d4; 
+      }
+      
+      /* Core Animations */
+      .animate-fade-in {
+        animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      
+      .animate-float {
+        animation: float 6s ease-in-out infinite;
+      }
+
+      .animate-pulse-slow {
+        animation: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+
+      .animate-gradient-xy {
+        background-size: 200% 200%;
+        animation: gradient-xy 15s ease infinite;
+      }
+
+      .animate-glow {
+        animation: glow 2s ease-in-out infinite alternate;
+      }
+      
+      .bg-grid-pattern {
+        background-image: linear-gradient(to right, #1f2937 1px, transparent 1px),
+                          linear-gradient(to bottom, #1f2937 1px, transparent 1px);
+        background-size: 50px 50px;
+        mask-image: linear-gradient(to bottom, transparent, 10%, white, 90%, transparent);
+      }
+
+      /* Click Effect Animation */
+      .click-effect {
+        position: fixed;
+        pointer-events: none;
+        font-family: 'Courier New', monospace;
+        font-weight: 900;
+        font-size: 10px; /* Small size as requested */
+        background: linear-gradient(45deg, #22d3ee, #e879f9, #ffffff);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        z-index: 10000;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        animation: floatUp 0.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+        text-shadow: 0 0 10px rgba(34, 211, 238, 0.3);
+        white-space: nowrap;
+      }
+
+      @keyframes floatUp {
+        0% {
+          opacity: 0;
+          transform: translate(-50%, -50%) scale(0.5);
+          filter: blur(2px);
+        }
+        20% {
+          opacity: 1;
+          transform: translate(-50%, -120%) scale(1.2);
+          filter: blur(0);
+        }
+        100% {
+          opacity: 0;
+          transform: translate(-50%, -300%) scale(1);
+          filter: blur(1px);
+        }
+      }
+
+      /* Micro-interactions */
+      .input-group:focus-within label {
+        color: #22d3ee;
+        transform: translateY(-20px) scale(0.9);
+      }
+
+      .btn-loading {
+        position: relative;
+        color: transparent !important;
+      }
+      .btn-loading::after {
+        content: "";
+        position: absolute;
+        width: 16px;
+        height: 16px;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        margin: auto;
+        border: 2px solid transparent;
+        border-top-color: #ffffff;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(20px); filter: blur(10px); }
+        to { opacity: 1; transform: translateY(0); filter: blur(0); }
+      }
+
+      @keyframes float {
+        0%, 100% { transform: translateY(0) translateX(0); }
+        50% { transform: translateY(-20px) translateX(10px); }
+      }
+
+      @keyframes gradient-xy {
+          0% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
+      }
+
+      @keyframes glow {
+        from { box-shadow: 0 0 10px -10px #22d3ee; }
+        to { box-shadow: 0 0 20px 5px #22d3ee; }
+      }
+
+      .glass-panel {
+        background: rgba(15, 23, 42, 0.6);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      /* --- HACKER MODE STYLES --- */
+      .hacker-font {
+        font-family: 'Courier New', Courier, monospace;
+      }
+      
+      .hacker-bg {
+        background-color: #050505;
+        background-image: radial-gradient(rgba(0, 150, 0, 0.15) 1px, transparent 1px);
+        background-size: 20px 20px;
+      }
+
+      .hacker-text {
+        color: #00ff41;
+        text-shadow: 0 0 5px rgba(0, 255, 65, 0.5);
+      }
+
+      .hacker-border {
+        border-color: #00ff41 !important;
+        box-shadow: 0 0 10px rgba(0, 255, 65, 0.2);
+      }
+
+      /* CRT Scanline Effect */
+      .scanlines {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+          to bottom,
+          rgba(255,255,255,0),
+          rgba(255,255,255,0) 50%,
+          rgba(0,0,0,0.2) 50%,
+          rgba(0,0,0,0.2)
+        );
+        background-size: 100% 4px;
+        z-index: 5;
+        pointer-events: none;
+        animation: scanline 10s linear infinite;
+        opacity: 0.3;
+      }
+      
+      @keyframes scanline {
+        0% { background-position: 0 0; }
+        100% { background-position: 0 100%; }
+      }
+
+      /* Glitch Effect */
+      .glitch-text {
+        position: relative;
+      }
+      .glitch-text::before,
+      .glitch-text::after {
+        content: attr(data-text);
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+      }
+      .glitch-text::before {
+        left: 2px;
+        text-shadow: -1px 0 #ff00c1;
+        clip: rect(44px, 450px, 56px, 0);
+        animation: glitch-anim 5s infinite linear alternate-reverse;
+      }
+      .glitch-text::after {
+        left: -2px;
+        text-shadow: -1px 0 #00fff9;
+        clip: rect(44px, 450px, 56px, 0);
+        animation: glitch-anim2 5s infinite linear alternate-reverse;
+      }
+
+      @keyframes glitch-anim {
+        0% { clip: rect(13px, 9999px, 81px, 0); }
+        5% { clip: rect(74px, 9999px, 86px, 0); }
+        10% { clip: rect(25px, 9999px, 14px, 0); }
+        15% { clip: rect(6px, 9999px, 32px, 0); }
+        20% { clip: rect(62px, 9999px, 95px, 0); }
+        100% { clip: rect(38px, 9999px, 57px, 0); }
+      }
+      @keyframes glitch-anim2 {
+        0% { clip: rect(2px, 9999px, 1px, 0); }
+        5% { clip: rect(54px, 9999px, 34px, 0); }
+        10% { clip: rect(15px, 9999px, 94px, 0); }
+        15% { clip: rect(82px, 9999px, 62px, 0); }
+        20% { clip: rect(12px, 9999px, 4px, 0); }
+        100% { clip: rect(29px, 9999px, 84px, 0); }
+      }
+
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+    "firebase/": "https://aistudiocdn.com/firebase@^12.6.0/",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0",
+    "react-markdown": "https://aistudiocdn.com/react-markdown@^10.1.0",
+    "vite": "https://aistudiocdn.com/vite@^7.2.4",
+    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1"
+  }
+}
+</script>
+</head>
+  <body class="bg-black text-white overflow-hidden selection:bg-cyan-500 selection:text-white font-sans antialiased">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

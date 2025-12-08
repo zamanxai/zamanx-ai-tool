@@ -1,0 +1,7 @@
+{
+  "name": "Copy of ZamanX AI",
+  "description": "Your all-in-one AI hub. Create, chat, generate, and explore AI tools all in one place!",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

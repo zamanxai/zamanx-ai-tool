@@ -1,0 +1,135 @@
+
+import React, { useState, useEffect } from 'react';
+import { generateImage } from '../services/geminiService';
+import { useToolContext } from '../contexts/ToolContext';
+import Button from '../components/Button';
+import { TextArea } from '../components/Input';
+import { Download, Smile, User, Sparkles } from 'lucide-react';
+
+const AvatarGenerator: React.FC = () => {
+  const { avatarState, setAvatarState } = useToolContext();
+  const [description, setDescription] = useState(avatarState.description);
+  const [style, setStyle] = useState(avatarState.style);
+  const [result, setResult] = useState<string | null>(avatarState.result);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setAvatarState({ description, style, result });
+  }, [description, style, result, setAvatarState]);
+
+  const styles = ['3D Render', 'Anime', 'Realistic', 'Pixel Art', 'Cyberpunk', 'Oil Painting', 'Sketch'];
+
+  const handleGenerate = async () => {
+    if (!description.trim()) return;
+    setIsLoading(true);
+    setError(null);
+    setResult(null);
+
+    const fullPrompt = `Create a high-quality ${style} avatar of ${description}. The image should be a close-up or medium shot suitable for a profile picture, centered composition, high detail, professional lighting.`;
+
+    try {
+      const images = await generateImage(fullPrompt);
+      if (images && images.length > 0) {
+          setResult(images[0]);
+      } else {
+          throw new Error("No image generated");
+      }
+    } catch (err) {
+      setError("Failed to generate avatar. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDownload = () => {
+    if (result) {
+      const link = document.createElement('a');
+      link.href = result;
+      link.download = `zamanx-avatar-${Date.now()}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-8 animate-fade-in">
+      <div className="text-center space-y-2">
+        <h2 className="text-3xl font-bold text-white flex items-center justify-center gap-2">
+          <Smile className="text-yellow-400" /> AI Avatar Studio
+        </h2>
+        <p className="text-gray-400">Create unique characters and profile pictures in seconds.</p>
+      </div>
+
+      <div className="bg-gray-900 rounded-2xl border border-gray-800 p-6 space-y-6">
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">Choose Style</label>
+          <div className="flex flex-wrap gap-2">
+            {styles.map((s) => (
+              <button
+                key={s}
+                onClick={() => setStyle(s)}
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                  style === s 
+                    ? 'bg-yellow-600 text-white shadow-lg shadow-yellow-900/20' 
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <TextArea
+          label="Describe Character"
+          placeholder="E.g., A futuristic female warrior with neon blue hair, smiling, confident expression..."
+          rows={3}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+        
+        <div className="flex justify-end">
+          <Button 
+            onClick={handleGenerate} 
+            disabled={isLoading || !description.trim()}
+            className="w-full sm:w-auto !bg-yellow-600 hover:!bg-yellow-500"
+            icon={<Sparkles size={18} />}
+          >
+            {isLoading ? 'Creating...' : 'Create Avatar'}
+          </Button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="p-4 bg-red-900/20 border border-red-500/50 rounded-lg text-red-200 text-center">
+          {error}
+        </div>
+      )}
+
+      {result && (
+        <div className="space-y-4 animate-fade-in text-center">
+          <div className="relative inline-block group rounded-full overflow-hidden border-4 border-gray-800 shadow-2xl bg-black w-64 h-64 md:w-80 md:h-80">
+            <img src={result} alt="Generated Avatar" className="w-full h-full object-cover" />
+            
+            <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm">
+              <Button onClick={handleDownload} variant="secondary" icon={<Download size={18} />}>
+                Save
+              </Button>
+            </div>
+          </div>
+          
+          <div className="flex flex-col items-center gap-1">
+             <div className="text-xs text-gray-500 bg-gray-900 px-3 py-1 rounded-full border border-gray-800">
+               Generated by ZamanX AI
+             </div>
+             <p className="text-sm text-gray-600">Contact: 0343 3498450</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default AvatarGenerator;
