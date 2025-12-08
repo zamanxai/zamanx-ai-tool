@@ -23,7 +23,6 @@ export default defineConfig(({ mode }) => {
       },
       'process.platform': JSON.stringify('browser'),
       'process.version': JSON.stringify('1.0.0'),
-      'process.cwd': 'function() { return "/" }',
       'global': 'window'
     }
   };
