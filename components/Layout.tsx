@@ -1,19 +1,20 @@
-
-import React, { useState, useEffect } from 'react';
-import { View, AIProvider, ToolConfig, Currency } from '../types';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, AIProvider, ToolConfig, Currency, SupportTicket, Notification } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useToolContext } from '../contexts/ToolContext';
-import { setDynamicApiKey, removeDynamicApiKey } from '../services/geminiService';
+import { setDynamicApiKey } from '../services/geminiService';
+import { db } from '../firebaseConfig';
+import { collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import { createSupportTicket, replyToTicket, markNotificationRead } from '../services/adminService';
 import { 
   Menu, X, MessageSquare, Image as ImageIcon, 
   Type, Mic, Code, Home, Phone, BarChart, Smile,
   Eye, Calculator, Moon, GraduationCap, Shield, LogOut, Key, Server, Check,
-  Share2, FileText, Scale, Dumbbell, Ticket, Lock, CheckCircle, Globe, User, Workflow, Megaphone
+  Share2, FileText, Scale, Dumbbell, Ticket, Lock, CheckCircle, Globe, User, Workflow, Megaphone, Zap, AlertTriangle, WifiOff, Activity, Send, Bell, Loader2
 } from 'lucide-react';
 import Button from './Button';
 import { Input } from './Input';
 import PaymentModal from './PaymentModal';
-import { createSupportTicket } from '../services/adminService';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -23,34 +24,9 @@ interface LayoutProps {
 
 // Background Component for Branding
 const BrandedBackground = () => {
-    // Generate static positions to avoid re-render flicker
-    const items = [
-        { top: '10%', left: '5%', delay: '0s', duration: '20s', size: 'text-xs', opacity: 'opacity-10' },
-        { top: '30%', left: '80%', delay: '5s', duration: '25s', size: 'text-sm', opacity: 'opacity-5' },
-        { top: '70%', left: '15%', delay: '2s', duration: '22s', size: 'text-xs', opacity: 'opacity-10' },
-        { top: '50%', left: '50%', delay: '10s', duration: '30s', size: 'text-lg', opacity: 'opacity-[0.03]' },
-        { top: '85%', left: '90%', delay: '8s', duration: '18s', size: 'text-xs', opacity: 'opacity-10' },
-        { top: '5%', left: '60%', delay: '15s', duration: '28s', size: 'text-sm', opacity: 'opacity-5' },
-        { top: '90%', left: '30%', delay: '1s', duration: '24s', size: 'text-xs', opacity: 'opacity-5' },
-    ];
-
     return (
         <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden select-none">
-            {items.map((item, index) => (
-                <div 
-                    key={index}
-                    className={`absolute font-black text-white ${item.size} ${item.opacity} animate-float`}
-                    style={{ 
-                        top: item.top, 
-                        left: item.left, 
-                        animationDelay: item.delay,
-                        animationDuration: item.duration,
-                        fontFamily: 'monospace'
-                    }}
-                >
-                    ZAMANX AI
-                </div>
-            ))}
+            <div className="absolute top-[10%] left-[5%] text-xs opacity-10 animate-float font-mono text-white">ZAMANX AI</div>
         </div>
     );
 };
@@ -67,7 +43,6 @@ const BootSequence = ({ onComplete, username }: { onComplete: () => void, userna
       `WELCOME, ${username.toUpperCase()}.`,
       "ACCESS GRANTED."
     ];
-    
     let timer: any;
     if (step < sequence.length) {
        timer = setTimeout(() => {
@@ -96,29 +71,89 @@ const BootSequence = ({ onComplete, username }: { onComplete: () => void, userna
 const Layout: React.FC<LayoutProps> = ({ children, currentView, onChangeView }) => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const { currentUser, userProfile, isAdmin, logout, updateProfile } = useAuth();
-  const { tools, rates } = useToolContext();
+  const { tools, rates, globalApiKey, keyStatus } = useToolContext();
   
-  // Local Key Modal State
-  const [showKeyModal, setShowKeyModal] = useState(false);
-  const [localKey, setLocalKey] = useState('');
-  const [localProvider, setLocalProvider] = useState<AIProvider>('GOOGLE');
-
   const [showBoot, setShowBoot] = useState(false);
   const [showChatDialog, setShowChatDialog] = useState(false);
   const [chatMessage, setChatMessage] = useState('');
-
-  // Payment Modal State for Sidebar
   const [selectedToolForPurchase, setSelectedToolForPurchase] = useState<ToolConfig | null>(null);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  
+  // Notification State
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [myNotifications, setMyNotifications] = useState<Notification[]>([]);
+  
+  // Live Chat State
+  const [activeTicket, setActiveTicket] = useState<SupportTicket | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
 
   const currencies: Currency[] = ['USD', 'PKR', 'INR', 'AED'];
 
+  // Network Status Listener
+  useEffect(() => {
+      const handleOnline = () => setIsOnline(true);
+      const handleOffline = () => setIsOnline(false);
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+      return () => {
+          window.removeEventListener('online', handleOnline);
+          window.removeEventListener('offline', handleOffline);
+      };
+  }, []);
+
+  // Notifications Listener (User Specific + Global)
+  useEffect(() => {
+      if (!currentUser) return;
+      
+      const q = query(collection(db, "notifications"), orderBy("timestamp", "desc"), limit(20));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+          const allNotes = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Notification));
+          // Filter relevant notifications (Global OR Targeted to User)
+          const relevant = allNotes.filter(n => n.type === 'global' || n.target === currentUser.uid);
+          setMyNotifications(relevant);
+      });
+      return () => unsubscribe();
+  }, [currentUser]);
+
+  const handleMarkRead = async (id: string) => {
+      if (currentUser) {
+          await markNotificationRead(id, currentUser.uid);
+      }
+  };
+
+  const unreadCount = myNotifications.filter(n => !n.seenBy?.includes(currentUser?.uid || '')).length;
+
+  // Live Chat Listener
+  useEffect(() => {
+      if (currentUser && showChatDialog) {
+          const q = query(
+              collection(db, "support_tickets"), 
+              where("userId", "==", currentUser.uid),
+              where("status", "in", ["pending", "active"]),
+              orderBy("lastUpdate", "desc"),
+              limit(1)
+          );
+          
+          const unsubscribe = onSnapshot(q, (snapshot) => {
+              if (!snapshot.empty) {
+                  const data = snapshot.docs[0].data() as SupportTicket;
+                  setActiveTicket({ id: snapshot.docs[0].id, ...data });
+              } else {
+                  setActiveTicket(null);
+              }
+          });
+          return () => unsubscribe();
+      }
+  }, [currentUser, showChatDialog]);
+
+  useEffect(() => {
+      if (showChatDialog && activeTicket) {
+          chatScrollRef.current?.scrollIntoView({ behavior: "smooth" });
+      }
+  }, [activeTicket, showChatDialog]);
+
   // Initialize state from local storage on mount
   useEffect(() => {
-      const storedKey = localStorage.getItem('zamanx_api_key');
-      const storedProvider = localStorage.getItem('zamanx_provider') as AIProvider;
-      if (storedKey) setLocalKey(storedKey);
-      if (storedProvider) setLocalProvider(storedProvider);
-      
       // Trigger boot sequence only once per session
       if (currentUser && !sessionStorage.getItem('boot_shown')) {
           setShowBoot(true);
@@ -126,36 +161,16 @@ const Layout: React.FC<LayoutProps> = ({ children, currentView, onChangeView }) 
       }
   }, [currentUser]);
 
-  // Global Click Effect Logic
-  useEffect(() => {
-    const handleGlobalClick = (e: MouseEvent) => {
-        const el = document.createElement('div');
-        el.className = 'click-effect';
-        el.innerText = 'ZamanX AI';
-        el.style.left = `${e.clientX}px`;
-        el.style.top = `${e.clientY}px`;
-        document.body.appendChild(el);
-        setTimeout(() => {
-            if (document.body.contains(el)) document.body.removeChild(el);
-        }, 1000);
-    };
-    window.addEventListener('click', handleGlobalClick);
-    return () => window.removeEventListener('click', handleGlobalClick);
-  }, []);
-
-  // Helper: Check if tool is locked based on plan/purchase
   const isToolLocked = (tool: ToolConfig | undefined) => {
       if (!tool) return true;
       if (tool.access === 'Free') return false;
       if (userProfile?.role === 'superadmin') return false;
+      // Check direct tool grant first (this covers the "Specific User" requirement)
       if (userProfile?.purchasedTools?.includes(tool.id)) return false;
       
       const userPlan = userProfile?.plan || 'Free';
       const levels: Record<string, number> = { 'Free': 0, 'Basic': 1, 'Pro': 2, 'Ultra': 3 };
-      const userLevel = levels[userPlan] || 0;
-      const toolLevel = levels[tool.access] || 0;
-      
-      return userLevel < toolLevel;
+      return (levels[userPlan] || 0) < (levels[tool.access] || 0);
   };
 
   const userCurrency = userProfile?.currency || 'USD';
@@ -191,10 +206,7 @@ const Layout: React.FC<LayoutProps> = ({ children, currentView, onChangeView }) 
 
   const navItems = allNavItems.filter(item => {
       if (item.id === View.HOME || item.id === View.CONTACT) return true;
-      
-      // Critical Fix: If tools are not yet loaded, hide tool items to prevent unauthorized access race condition
       if (tools.length === 0) return false;
-
       const tool = tools.find(t => t.id === item.id);
       return tool ? tool.visibility === 'visible' : false;
   });
@@ -204,28 +216,20 @@ const Layout: React.FC<LayoutProps> = ({ children, currentView, onChangeView }) 
   }
 
   const handleNavClick = (view: View) => {
-    // Standard views always accessible
     if (view === View.HOME || view === View.CONTACT || view === View.ADMIN_DASHBOARD) {
         onChangeView(view);
         setIsSidebarOpen(false);
         return;
     }
-
     const tool = tools.find(t => t.id === view);
-    
-    // Check if tool is locked
     if (tool) {
         const locked = isToolLocked(tool);
-        
-        // Block access if tool is locked AND demo is NOT available
-        // If demo is available, we allow access (Tool page handles demo limitations)
         if (locked && !tool.demoAvailable) {
             setSelectedToolForPurchase(tool);
             setIsSidebarOpen(false);
             return;
         }
     }
-
     onChangeView(view);
     setIsSidebarOpen(false);
   };
@@ -236,39 +240,19 @@ const Layout: React.FC<LayoutProps> = ({ children, currentView, onChangeView }) 
     sessionStorage.removeItem('boot_shown'); 
   };
 
-  const handleSaveLocalKey = () => {
-      if (!localKey.trim()) {
-          alert("Please enter a valid API Key.");
-          return;
-      }
-      setDynamicApiKey(localKey, localProvider);
-      setShowKeyModal(false);
-      window.location.reload(); 
-  };
-
-  const handleClearLocalKey = () => {
-      removeDynamicApiKey();
-      setLocalKey('');
-      setShowKeyModal(false);
-      window.location.reload(); 
-  };
-
   const handleLiveChatSubmit = async () => {
       if(userProfile && chatMessage) {
-          await createSupportTicket(userProfile.uid, userProfile.email, "Live Chat Request", chatMessage);
-          alert("Request sent! Admin will respond shortly.");
-          setShowChatDialog(false);
+          if (activeTicket) {
+              await replyToTicket(activeTicket.id, chatMessage, false);
+          } else {
+              await createSupportTicket(userProfile.uid, userProfile.email, "Live Support Request", chatMessage);
+          }
           setChatMessage('');
       }
   };
 
   if (currentView === View.LOGIN || currentView === View.SIGNUP || currentView === View.ADMIN_LOGIN || currentView === View.FORGOT_PASSWORD) {
-    return (
-        <div className="relative">
-             <BrandedBackground />
-             {children}
-        </div>
-    );
+    return <div className="relative"><BrandedBackground />{children}</div>;
   }
 
   if (showBoot) {
@@ -282,52 +266,135 @@ const Layout: React.FC<LayoutProps> = ({ children, currentView, onChangeView }) 
       
       <BrandedBackground />
 
-      <div className="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-cyan-600/10 blur-[120px] animate-float"></div>
-      <div className="fixed bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-purple-600/10 blur-[120px] animate-float" style={{ animationDelay: '3s' }}></div>
+      {/* Offline Banner */}
+      {!isOnline && (
+          <div className="fixed top-0 left-0 right-0 bg-red-600 text-white text-xs font-bold text-center py-1 z-[100] animate-pulse">
+              NO INTERNET CONNECTION DETECTED. SOME FEATURES MAY NOT WORK.
+          </div>
+      )}
 
+      {/* Mobile Header */}
       <div className="lg:hidden fixed top-0 w-full glass-panel z-50 flex items-center justify-between p-4 border-b border-gray-800/50">
         <div className="flex items-center gap-2 font-bold text-xl text-white">
           <div className="w-8 h-8 bg-gradient-to-tr from-cyan-500 to-blue-600 rounded-lg flex items-center justify-center shadow-[0_0_15px_rgba(6,182,212,0.5)]">Z</div>
           <span className="bg-clip-text text-transparent bg-gradient-to-r from-white to-cyan-200">ZamanX AI</span>
         </div>
-        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 text-gray-400 hover:text-white transition-colors">
-          {isSidebarOpen ? <X size={24} /> : <Menu size={24} />}
-        </button>
+        
+        <div className="flex items-center gap-4">
+            {/* Mobile Notification Bell */}
+            <div className="relative">
+                <button onClick={() => setShowNotifications(!showNotifications)} className="relative p-1 text-gray-400 hover:text-white">
+                    <Bell size={20} />
+                    {unreadCount > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] flex items-center justify-center rounded-full animate-pulse">{unreadCount}</span>}
+                </button>
+                {showNotifications && (
+                    <div className="absolute right-0 top-8 w-64 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden z-50">
+                        <div className="p-3 border-b border-gray-800 font-bold text-xs uppercase tracking-wider text-gray-500">Notifications</div>
+                        <div className="max-h-60 overflow-y-auto">
+                            {myNotifications.length === 0 ? (
+                                <div className="p-4 text-center text-xs text-gray-500">No new messages</div>
+                            ) : (
+                                myNotifications.map(n => (
+                                    <div key={n.id} onClick={() => handleMarkRead(n.id)} className={`p-3 border-b border-gray-800/50 hover:bg-gray-800 cursor-pointer ${!n.seenBy?.includes(currentUser?.uid || '') ? 'bg-cyan-900/10' : ''}`}>
+                                        <div className="text-xs font-bold text-white mb-1">{n.title}</div>
+                                        <div className="text-[10px] text-gray-400">{n.message}</div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
+            
+            <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 text-gray-400 hover:text-white transition-colors">
+              {isSidebarOpen ? <X size={24} /> : <Menu size={24} />}
+            </button>
+        </div>
       </div>
 
-      <aside 
-        className={`fixed lg:static inset-y-0 left-0 w-72 glass-panel border-r border-gray-800/50 transform transition-transform duration-300 z-40 lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} flex flex-col`}
-      >
+      <aside className={`fixed lg:static inset-y-0 left-0 w-72 glass-panel border-r border-gray-800/50 transform transition-transform duration-300 z-40 lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} flex flex-col`}>
         <div className="p-6 hidden lg:flex items-center gap-3 font-bold text-2xl text-white mb-2 relative group cursor-default">
              <div className="absolute -inset-1 bg-gradient-to-r from-cyan-500 to-purple-600 rounded-lg blur opacity-25 group-hover:opacity-50 transition duration-1000 group-hover:duration-200"></div>
              <div className="w-10 h-10 bg-gradient-to-tr from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg relative z-10 text-xl">Z</div>
              <span className="tracking-tight relative z-10 bg-clip-text text-transparent bg-gradient-to-r from-white via-cyan-100 to-white">ZamanX AI</span>
         </div>
 
-        {currentUser && (
-            <div className="px-4 mb-2">
-                <div 
-                    onClick={() => { onChangeView(View.USER_PROFILE); setIsSidebarOpen(false); }}
-                    className="p-3 bg-gray-800/50 rounded-xl flex items-center gap-3 border border-gray-700/50 cursor-pointer hover:bg-gray-800 hover:border-cyan-500/50 transition-all group"
-                >
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-xs font-bold overflow-hidden">
-                        {userProfile?.photoURL ? (
-                            <img src={userProfile.photoURL} alt="Profile" className="w-full h-full object-cover" />
+        {/* Desktop Notification Bell (in Sidebar Top) */}
+        <div className="px-4 mb-4 hidden lg:block relative">
+             <button onClick={() => setShowNotifications(!showNotifications)} className="w-full flex items-center justify-between p-3 rounded-xl bg-gray-900/50 border border-gray-700/50 hover:bg-gray-800 transition-all">
+                 <div className="flex items-center gap-3 text-sm font-bold text-gray-300">
+                     <Bell size={16} className={unreadCount > 0 ? 'text-yellow-400 animate-swing' : 'text-gray-500'} />
+                     Notifications
+                 </div>
+                 {unreadCount > 0 && <span className="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">{unreadCount}</span>}
+             </button>
+             
+             {showNotifications && (
+                <div className="absolute left-4 right-4 top-14 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl overflow-hidden z-50 animate-fade-in">
+                    <div className="p-3 border-b border-gray-800 font-bold text-xs uppercase tracking-wider text-gray-500 flex justify-between items-center">
+                        <span>Inbox</span>
+                        <button onClick={()=>setShowNotifications(false)}><X size={14}/></button>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                        {myNotifications.length === 0 ? (
+                            <div className="p-6 text-center text-xs text-gray-500">No new messages</div>
                         ) : (
-                            currentUser.email?.[0].toUpperCase()
+                            myNotifications.map(n => (
+                                <div key={n.id} onClick={() => handleMarkRead(n.id)} className={`p-3 border-b border-gray-800/50 hover:bg-gray-800 cursor-pointer transition-colors ${!n.seenBy?.includes(currentUser?.uid || '') ? 'bg-cyan-900/10 border-l-2 border-l-cyan-500' : ''}`}>
+                                    <div className="flex justify-between items-start mb-1">
+                                        <span className="text-xs font-bold text-white">{n.title}</span>
+                                        <span className="text-[10px] text-gray-600">{new Date(n.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                    </div>
+                                    <p className="text-[11px] text-gray-400 leading-relaxed">{n.message}</p>
+                                </div>
+                            ))
                         )}
                     </div>
-                    <div className="flex-1 overflow-hidden">
-                        <p className="text-sm font-bold truncate group-hover:text-cyan-400 transition-colors">{userProfile?.username || 'User'}</p>
-                        <div className="flex items-center gap-2">
-                           <p className="text-[10px] text-gray-400 uppercase tracking-wider">{userProfile?.plan || 'Free'} Plan</p>
-                        </div>
-                    </div>
                 </div>
-            </div>
-        )}
-        
-        {/* Currency Changer */}
+             )}
+        </div>
+
+        {/* Global API Key Status Widget - HIDDEN FOR USERS, VISIBLE FOR ADMINS */}
+        <div className="px-4 mb-2">
+            {isAdmin ? (
+                // Admin View: Full Details
+                globalApiKey ? (
+                    <div className="bg-green-900/10 border border-green-500/20 p-3 rounded-xl backdrop-blur-sm cursor-pointer hover:bg-green-900/20" onClick={() => onChangeView(View.ADMIN_DASHBOARD)}>
+                       <div className="flex items-center justify-between">
+                           <div className="text-[10px] font-bold text-green-500 uppercase flex items-center gap-1.5">
+                               <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span> Active Key
+                           </div>
+                           <span className="text-[10px] text-green-600 font-mono">{keyStatus.usage} reqs</span>
+                       </div>
+                       <div className="text-xs font-mono text-gray-300 mt-1 tracking-wider">
+                           sk-{globalApiKey.substring(0, 4)}...{globalApiKey.slice(-4)}
+                       </div>
+                    </div>
+                ) : (
+                    <div className="bg-red-900/10 border border-red-500/30 p-3 rounded-xl backdrop-blur-sm cursor-pointer hover:bg-red-900/20 transition-colors" onClick={() => onChangeView(View.ADMIN_DASHBOARD)}>
+                       <div className="text-[10px] font-bold text-red-400 uppercase flex items-center gap-1.5 mb-1">
+                           <AlertTriangle size={12}/> Admin: Add Key
+                       </div>
+                       <div className="text-[10px] text-gray-500">
+                           System needs an API key to function.
+                       </div>
+                    </div>
+                )
+            ) : (
+                // User View: Simplified Status
+                <div className="bg-gray-900/50 border border-gray-700/50 p-2 rounded-xl backdrop-blur-sm flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${isOnline ? (globalApiKey ? 'bg-green-500 animate-pulse' : 'bg-yellow-500') : 'bg-red-500'}`}></span>
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                            {isOnline ? (globalApiKey ? 'System Online' : 'Maintenance') : 'Offline'}
+                        </span>
+                    </div>
+                    {isOnline && globalApiKey && <Activity size={12} className="text-green-500"/>}
+                </div>
+            )}
+        </div>
+
+        {/* Currency & User Profile */}
         <div className="px-4 mb-2">
             <div className="p-2 bg-gray-900/50 rounded-xl border border-gray-700/50">
                 <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1">
@@ -382,31 +449,11 @@ const Layout: React.FC<LayoutProps> = ({ children, currentView, onChangeView }) 
           })}
           
           <div className="border-t border-gray-800 mt-2 pt-2">
-            {isAdmin && (
-              <button 
-                  onClick={() => setShowKeyModal(true)}
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all mb-1 text-gray-500 hover:text-gray-300 hover:bg-gray-800/50"
-                  title="Configure Local API Key for Testing"
-              >
-                  <Key size={20} />
-                  <span>{localStorage.getItem('zamanx_api_key') ? 'Manage Local Key' : 'Set Local Key'}</span>
-              </button>
-            )}
-            
-            <button 
-                onClick={() => { onChangeView(View.USER_PROFILE); setIsSidebarOpen(false); }}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all mb-1 ${currentView === View.USER_PROFILE ? 'text-cyan-400 font-bold' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'}`}
-            >
-                <User size={20} />
-                <span>My Profile</span>
+            <button onClick={() => { onChangeView(View.USER_PROFILE); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all mb-1 ${currentView === View.USER_PROFILE ? 'text-cyan-400 font-bold' : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'}`}>
+                <User size={20} /><span>My Profile</span>
             </button>
-
-            <button 
-                onClick={handleLogout}
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-900/10 hover:text-red-300 transition-all"
-            >
-                <LogOut size={20} />
-                <span>Sign Out</span>
+            <button onClick={handleLogout} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-900/10 hover:text-red-300 transition-all">
+                <LogOut size={20} /><span>Sign Out</span>
             </button>
           </div>
         </nav>
@@ -420,96 +467,83 @@ const Layout: React.FC<LayoutProps> = ({ children, currentView, onChangeView }) 
         </div>
       </main>
 
-      {/* ... (Existing Chat & Key Modals code remains the same) ... */}
-      
+      {/* Floating Action Button for Support */}
+      <button 
+          onClick={() => setShowChatDialog(true)}
+          className="fixed bottom-6 right-6 z-[90] p-4 bg-gradient-to-tr from-cyan-600 to-blue-600 text-white rounded-full shadow-[0_0_20px_rgba(6,182,212,0.5)] hover:scale-110 transition-transform flex items-center gap-2 font-bold"
+      >
+          <Ticket size={24} />
+      </button>
+
+      {/* Live Support Modal */}
       {showChatDialog && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-              <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md p-6 shadow-2xl">
-                  <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
-                      <Ticket className="text-green-500"/> Live Support Chat
-                  </h3>
-                  <p className="text-gray-400 text-sm mb-4">Describe your issue or request. An admin will connect with you shortly.</p>
-                  <Input 
-                      placeholder="Type your message..." 
-                      value={chatMessage} 
-                      onChange={e=>setChatMessage(e.target.value)}
-                      className="mb-4"
-                  />
-                  <div className="flex gap-3">
-                      <Button onClick={handleLiveChatSubmit} className="flex-1 !bg-green-600">Send Request</Button>
-                      <Button onClick={()=>setShowChatDialog(false)} variant="secondary">Cancel</Button>
-                  </div>
-              </div>
-          </div>
-      )}
-      
-      {isSidebarOpen && (
-        <div 
-          className="fixed inset-0 bg-black/80 z-30 lg:hidden backdrop-blur-sm transition-opacity"
-          onClick={() => setIsSidebarOpen(false)}
-        />
-      )}
-      
-      {/* Key Modal (truncated) */}
-      {showKeyModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-             {/* Key Modal Content */}
-             <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl animate-fade-in">
-                  <div className="flex justify-between items-center mb-6">
-                      <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                          <Server size={20} className="text-cyan-400"/> Local API Configuration
+              <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md shadow-2xl flex flex-col h-[500px]">
+                  <div className="p-4 border-b border-gray-800 bg-gray-950 flex justify-between items-center rounded-t-2xl">
+                      <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                          <Ticket className="text-green-500"/> Live Support
                       </h3>
-                      <button onClick={() => setShowKeyModal(false)} className="text-gray-500 hover:text-white">
+                      <button onClick={() => setShowChatDialog(false)} className="text-gray-400 hover:text-white">
                           <X size={20} />
                       </button>
                   </div>
-                  <div className="space-y-4">
-                      <div>
-                          <label className="block text-xs font-bold text-gray-500 mb-1 uppercase">AI Provider</label>
-                          <div className="relative">
-                              <select 
-                                  value={localProvider}
-                                  onChange={(e) => setLocalProvider(e.target.value as AIProvider)}
-                                  className="w-full bg-black/40 border border-gray-700 rounded-lg py-2.5 px-4 text-white focus:border-cyan-500 appearance-none"
-                              >
-                                  <option value="GOOGLE">ZamanX Core (G)</option>
-                                  <option value="OPENAI">ZamanX Pro (O)</option>
-                                  <option value="DEEPSEEK">ZamanX Deep (D)</option>
-                                  <option value="CLAUDE">ZamanX Logic (C)</option>
-                              </select>
-                              <div className="absolute right-4 top-3 pointer-events-none text-gray-500">▼</div>
+                  
+                  <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-black/40 custom-scrollbar">
+                      {activeTicket ? (
+                          <>
+                              <div className="text-center text-xs text-gray-500 mb-4">
+                                  Ticket #{activeTicket.id.substring(0,6)} - {activeTicket.subject}
+                              </div>
+                              {activeTicket.messages.map((msg, idx) => (
+                                  <div key={idx} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                      <div className={`max-w-[85%] p-3 rounded-xl ${msg.sender === 'user' ? 'bg-cyan-600 text-white rounded-br-none' : 'bg-gray-800 text-gray-200 rounded-bl-none'}`}>
+                                          <p className="text-sm">{msg.text}</p>
+                                          <p className="text-[10px] opacity-60 mt-1 text-right">{new Date(msg.timestamp).toLocaleTimeString()}</p>
+                                      </div>
+                                  </div>
+                              ))}
+                              {activeTicket.status === 'pending' && (
+                                  <div className="text-center p-4 animate-fade-in">
+                                      <div className="inline-flex items-center gap-2 px-4 py-2 bg-yellow-900/20 text-yellow-500 rounded-full text-xs font-bold border border-yellow-500/20">
+                                          <Loader2 size={12} className="animate-spin"/> Waiting for an agent to join...
+                                      </div>
+                                  </div>
+                              )}
+                              <div ref={chatScrollRef} />
+                          </>
+                      ) : (
+                          <div className="flex flex-col items-center justify-center h-full text-center p-6 text-gray-500">
+                              <Ticket size={48} className="mb-4 opacity-20"/>
+                              <p className="font-bold text-gray-400">How can we help?</p>
+                              <p className="text-xs">Start a chat to connect with an admin.</p>
                           </div>
-                      </div>
-                      <Input 
-                          label="API Key"
-                          placeholder="Paste your API Key here..."
-                          value={localKey}
-                          onChange={(e) => setLocalKey(e.target.value)}
-                          type="password"
-                      />
-                      <div className="flex gap-3 pt-2">
+                      )}
+                  </div>
+
+                  <div className="p-4 border-t border-gray-800 bg-gray-950 rounded-b-2xl">
+                      <div className="flex gap-2">
+                          <Input 
+                              placeholder={activeTicket ? "Type your reply..." : "Describe your issue..."} 
+                              value={chatMessage} 
+                              onChange={e=>setChatMessage(e.target.value)} 
+                              onKeyDown={e => e.key === 'Enter' && handleLiveChatSubmit()}
+                              className="bg-gray-900 border-gray-700"
+                              disabled={activeTicket?.status === 'pending'}
+                          />
                           <Button 
-                              onClick={handleSaveLocalKey} 
-                              className="flex-1"
-                              icon={<Check size={16}/>}
-                          >
-                              Save & Use
-                          </Button>
-                          {localStorage.getItem('zamanx_api_key') && (
-                              <Button 
-                                  onClick={handleClearLocalKey} 
-                                  variant="danger"
-                                  className="flex-1"
-                              >
-                                  Reset to System Default
-                              </Button>
-                          )}
+                            onClick={handleLiveChatSubmit} 
+                            className="!bg-green-600 px-4" 
+                            icon={<Send size={18}/>}
+                            disabled={activeTicket?.status === 'pending'}
+                          ></Button>
                       </div>
                   </div>
               </div>
           </div>
       )}
-
+      
+      {isSidebarOpen && <div className="fixed inset-0 bg-black/80 z-30 lg:hidden backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)} />}
+      
       {selectedToolForPurchase && (
           <PaymentModal 
               toolId={selectedToolForPurchase.id}
@@ -517,10 +551,7 @@ const Layout: React.FC<LayoutProps> = ({ children, currentView, onChangeView }) 
               price={convertPrice(selectedToolForPurchase.basePriceUSD)}
               currency={userCurrency}
               onClose={() => setSelectedToolForPurchase(null)}
-              onSuccess={() => {
-                  setSelectedToolForPurchase(null);
-                  window.location.reload();
-              }}
+              onSuccess={() => { setSelectedToolForPurchase(null); window.location.reload(); }}
           />
       )}
     </div>

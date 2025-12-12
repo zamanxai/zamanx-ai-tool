@@ -1,39 +1,65 @@
-
 import { db } from '../firebaseConfig';
-import { collection, getDocs, doc, updateDoc, addDoc, query, orderBy, limit, getDoc, setDoc, where, deleteDoc, arrayUnion } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, addDoc, query, orderBy, limit, getDoc, setDoc, where, deleteDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { UserProfile, AuditLog, UserRole, StoredKey, ActivityLog, ContactDetails, AIProvider, ToolConfig, ConversionRates, SupportTicket, PlanType, Notification, KeyRotationLog, AccessCode } from '../types';
 
 // --- Default System State ---
 export const DEFAULT_RATES: ConversionRates = { USD: 1, PKR: 278, INR: 83, AED: 3.67 };
 
-// --- Command Processor Engine (Legacy Support) ---
-export const executeAdminCommand = async (commandStr: string, adminEmail: string): Promise<string> => {
-    const parts = commandStr.trim().split(' ');
-    const cmd = parts[0].toLowerCase();
-    const args = parts.slice(1);
+// --- Tool Access Management (Per User) ---
 
-    try {
-        switch (cmd) {
-            case '/hidetool': return await updateToolVisibility(args[0], 'hidden');
-            case '/showtool': return await updateToolVisibility(args[0], 'visible');
-            case '/enabletool': return await updateToolStatus(args[0], 'active');
-            case '/disabletool': return await updateToolStatus(args[0], 'inactive');
-            case '/setaccess': return await updateToolAccess(args[0], args[1] as PlanType);
-            case '/setprice':
-                const usdPart = args.find(a => a.toLowerCase().startsWith('usd='));
-                if(usdPart) {
-                    const price = parseFloat(usdPart.split('=')[1]);
-                    return await updateToolPrice(args[0], price);
-                }
-                return "Please specify usd=X.XX";
-            default: return `Unknown command: ${cmd}`;
-        }
-    } catch (e: any) {
-        return `Error executing command: ${e.message}`;
-    }
+export const grantToolAccess = async (adminEmail: string, userId: string, toolId: string) => {
+    const userRef = doc(db, "users", userId);
+    await updateDoc(userRef, {
+        purchasedTools: arrayUnion(toolId)
+    });
+    await logAction(adminEmail, userId, `Granted access to tool: ${toolId}`);
 };
 
-// --- Tool Logic (Exported for UI) ---
+export const revokeToolAccess = async (adminEmail: string, userId: string, toolId: string) => {
+    const userRef = doc(db, "users", userId);
+    await updateDoc(userRef, {
+        purchasedTools: arrayRemove(toolId)
+    });
+    await logAction(adminEmail, userId, `Revoked access to tool: ${toolId}`);
+};
+
+// --- Notification System ---
+
+// Send to specific user
+export const sendUserNotification = async (adminEmail: string, targetUserId: string, title: string, message: string) => {
+    await addDoc(collection(db, "notifications"), {
+        title,
+        message,
+        timestamp: Date.now(),
+        type: 'user',
+        target: targetUserId,
+        seenBy: []
+    });
+    await logAction(adminEmail, targetUserId, `Sent notification: ${title}`);
+};
+
+// Send to all (Broadcast)
+export const sendBroadcast = async (message: string, adminEmail: string, title: string = "System Broadcast") => {
+    await addDoc(collection(db, "notifications"), {
+        title,
+        message,
+        timestamp: Date.now(),
+        type: 'global',
+        seenBy: []
+    });
+    await logAction(adminEmail, "ALL_USERS", `Sent broadcast: ${message}`);
+    return "Broadcast sent to all users.";
+};
+
+export const markNotificationRead = async (notificationId: string, userId: string) => {
+    const ref = doc(db, "notifications", notificationId);
+    await updateDoc(ref, {
+        seenBy: arrayUnion(userId)
+    });
+};
+
+// --- Existing Logic Below ---
+
 export const updateToolConfig = async (tool: ToolConfig, adminEmail: string) => {
     await setDoc(doc(db, "tools", tool.id), tool);
     await logAction(adminEmail, "System", `Updated config for tool ${tool.id}`);
@@ -162,18 +188,6 @@ export const purchaseTool = async (userId: string, toolId: string) => {
     });
 };
 
-// --- Broadcast ---
-export const sendBroadcast = async (message: string, adminEmail: string) => {
-    await addDoc(collection(db, "notifications"), {
-        title: "System Broadcast",
-        message,
-        timestamp: Date.now(),
-        type: 'global',
-        seenBy: []
-    });
-    return "Broadcast sent to all users.";
-};
-
 // --- Support Tickets ---
 export const createSupportTicket = async (userId: string, userEmail: string, subject: string, initialMessage: string) => {
     await addDoc(collection(db, "support_tickets"), {
@@ -188,6 +202,17 @@ export const createSupportTicket = async (userId: string, userEmail: string, sub
         }],
         createdAt: Date.now(),
         lastUpdate: Date.now()
+    });
+};
+
+export const acceptSupportTicket = async (ticketId: string, adminEmail: string) => {
+    await updateDoc(doc(db, "support_tickets", ticketId), {
+        status: 'active',
+        messages: arrayUnion({
+            sender: 'admin',
+            text: `Agent ${adminEmail.split('@')[0]} has joined the chat.`,
+            timestamp: Date.now()
+        })
     });
 };
 
@@ -206,6 +231,10 @@ export const replyToTicket = async (ticketId: string, message: string, isAdmin: 
     if (!snap.exists()) return;
     
     const data = snap.data() as SupportTicket;
+    
+    // Safety check: Don't allow replies to pending tickets unless it's an accept action (handled separately)
+    // or if the admin forces a reply.
+    
     const newMessages = [...data.messages, {
         sender: isAdmin ? 'admin' : 'user',
         text: message,
@@ -214,8 +243,7 @@ export const replyToTicket = async (ticketId: string, message: string, isAdmin: 
     
     await updateDoc(ticketRef, {
         messages: newMessages,
-        lastUpdate: Date.now(),
-        status: isAdmin ? 'active' : data.status
+        lastUpdate: Date.now()
     });
 };
 

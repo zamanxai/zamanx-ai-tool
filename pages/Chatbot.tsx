@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { generateChatStream, transcribeAudio, generateSpeech, enhancePrompt } from '../services/geminiService';
 import { logActivity } from '../services/loggingService';
@@ -81,7 +80,7 @@ You are not a chatbot. You are a fault-tolerant AI engine designed for 24/7 upti
     if (isRecording) {
       stopRecording();
     } else {
-      startRecording();
+      await startRecording();
     }
   };
 
@@ -103,9 +102,13 @@ You are not a chatbot. You are a fault-tolerant AI engine designed for 24/7 upti
 
       mediaRecorderRef.current.start();
       setIsRecording(true);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error accessing microphone:", err);
-      alert("Microphone access denied or unavailable.");
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          alert("Microphone access denied. Please allow microphone permissions in your browser settings to use voice features.");
+      } else {
+          alert("Could not access microphone. Ensure your device has a working microphone.");
+      }
     }
   };
 

@@ -1,11 +1,11 @@
-
 import React, { useEffect, useState } from 'react';
 import { View, ToolConfig } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { useToolContext } from '../contexts/ToolContext';
+import { markNotificationRead } from '../services/adminService';
 import { 
   MessageSquare, Image, Type, Mic, ArrowRight, Zap, Shield, 
-  Globe, Smile, BarChart, Eye, Calculator, Moon, GraduationCap, Scale, Dumbbell, Lock, FileText, Code, Video, Share2, Calendar, Phone, CheckCircle, Workflow, Megaphone
+  Globe, Smile, BarChart, Eye, Calculator, Moon, GraduationCap, Scale, Dumbbell, Lock, FileText, Code, Video, Share2, Calendar, Phone, CheckCircle, Workflow, Megaphone, X
 } from 'lucide-react';
 import Button from '../components/Button';
 import PaymentModal from '../components/PaymentModal';
@@ -16,7 +16,7 @@ interface HomeProps {
 
 const Home: React.FC<HomeProps> = ({ onChangeView }) => {
   const { tools, rates, notifications } = useToolContext();
-  const { userProfile } = useAuth();
+  const { userProfile, currentUser } = useAuth();
   const [currencySymbol, setCurrencySymbol] = useState('$');
   const [userCurrency, setUserCurrency] = useState('USD');
   const [selectedToolForPurchase, setSelectedToolForPurchase] = useState<ToolConfig | null>(null);
@@ -73,15 +73,27 @@ const Home: React.FC<HomeProps> = ({ onChangeView }) => {
       return false;
   };
 
+  const handleDismissNotification = async (id: string) => {
+      if (currentUser) {
+          await markNotificationRead(id, currentUser.uid);
+      }
+  };
+
   const visibleTools = tools.filter(t => t.visibility === 'visible' && t.id !== 'CONTACT');
+  
+  // Filter notifications to show only unread ones in the banner
+  const unreadNotifications = notifications.filter(n => 
+      (!n.seenBy || !n.seenBy.includes(currentUser?.uid || '')) && 
+      (n.type === 'global' || n.target === currentUser?.uid)
+  );
 
   return (
     <div className="space-y-12 animate-fade-in pb-12">
-      {/* Notifications */}
-      {notifications.length > 0 && (
+      {/* Notifications Banner */}
+      {unreadNotifications.length > 0 && (
           <div className="space-y-2">
-              {notifications.slice(0,2).map(n => (
-                  <div key={n.id} className="bg-gradient-to-r from-blue-900/40 to-cyan-900/40 border border-cyan-500/30 p-4 rounded-xl flex items-center justify-between backdrop-blur-sm shadow-lg">
+              {unreadNotifications.slice(0,1).map(n => (
+                  <div key={n.id} className="bg-gradient-to-r from-blue-900/40 to-cyan-900/40 border border-cyan-500/30 p-4 rounded-xl flex items-center justify-between backdrop-blur-sm shadow-lg relative group">
                       <div className="flex items-center gap-3">
                           <div className="p-2 bg-cyan-500/20 rounded-full"><Zap size={16} className="text-cyan-400"/></div>
                           <div>
@@ -89,7 +101,16 @@ const Home: React.FC<HomeProps> = ({ onChangeView }) => {
                             <p className="text-cyan-100/80 text-xs">{n.message}</p>
                           </div>
                       </div>
-                      <span className="text-xs text-cyan-500 font-mono">{new Date(n.timestamp).toLocaleTimeString()}</span>
+                      <div className="flex items-center gap-3">
+                          <span className="text-xs text-cyan-500 font-mono hidden sm:block">{new Date(n.timestamp).toLocaleTimeString()}</span>
+                          <button 
+                            onClick={() => handleDismissNotification(n.id)}
+                            className="p-1 text-cyan-400 hover:text-white hover:bg-cyan-500/20 rounded-full transition-all"
+                            title="Mark as Read"
+                          >
+                              <X size={16} />
+                          </button>
+                      </div>
                   </div>
               ))}
           </div>
@@ -104,11 +125,14 @@ const Home: React.FC<HomeProps> = ({ onChangeView }) => {
                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
                <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
              </span>
-             ZAMANX AI ENGINE v2.0
+             NEXT-GEN AI ECOSYSTEM
           </div>
           <h1 className="text-5xl lg:text-7xl font-black tracking-tighter text-white drop-shadow-2xl px-4">
-            UNLOCK <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-500 animate-gradient-xy">LIMITLESS POTENTIAL</span>
+            EMPOWERING YOUR <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-500 animate-gradient-xy">DIGITAL EVOLUTION</span>
           </h1>
+          <p className="text-lg text-gray-400 max-w-2xl mx-auto px-4">
+              Access the world's most powerful AI tools in one unified dashboard. From creative generation to complex automation, ZamanX is your engine for the future.
+          </p>
           {userProfile && (
               <div className="flex flex-wrap justify-center gap-4 text-sm font-mono text-gray-400">
                   <span className="bg-gray-900 px-3 py-1 rounded border border-gray-800 flex items-center gap-2">Plan: <span className="text-white font-bold">{userProfile.plan}</span></span>

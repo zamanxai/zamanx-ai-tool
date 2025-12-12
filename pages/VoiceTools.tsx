@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { generateSpeech, transcribeAudio } from '../services/geminiService';
 import { useToolContext } from '../contexts/ToolContext';
@@ -172,8 +171,13 @@ const VoiceTools: React.FC = () => {
               mediaRecorderRef.current.start();
               setIsRecording(true);
               setStatus("Recording Audio Stream...");
-          } catch (err) {
-              setStatus("Microphone Access Denied.");
+          } catch (err: any) {
+              if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                  setStatus("Microphone Permission Denied");
+                  alert("Please allow microphone access in your browser.");
+              } else {
+                  setStatus("Microphone Error: " + err.message);
+              }
           }
       }
   };

@@ -1,15 +1,20 @@
-
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { ChatMessage, HistoryItem, ToolConfig, ConversionRates, Notification, ContactDetails } from '../types';
 import { db } from '../firebaseConfig';
-import { collection, onSnapshot, doc, getDoc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc } from 'firebase/firestore';
+import { setDynamicApiKey } from '../services/geminiService';
 
 interface ToolContextType {
   tools: ToolConfig[];
   rates: ConversionRates;
   notifications: Notification[];
-  contactDetails: ContactDetails; // Added for real-time sync
+  contactDetails: ContactDetails;
   
+  // API Key State
+  globalApiKey: string;
+  setGlobalApiKey: (key: string) => void;
+  keyStatus: { status: 'active' | 'missing' | 'expired'; usage: number; limit: number };
+
   // State Containers
   chatState: any; setChatState: (s:any)=>void;
   imageState: any; setImageState: (s:any)=>void;
@@ -52,10 +57,75 @@ export const ToolProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       supportHours: '9 AM - 6 PM PKT'
   });
 
-  // Default Tools Seeding Logic
+  // --- Global API Key Logic ---
+  const [globalApiKey, setGlobalApiKeyState] = useState('');
+  const [keyStatus, setKeyStatus] = useState<{ status: 'active' | 'missing' | 'expired'; usage: number; limit: number }>({ 
+      status: 'missing', usage: 0, limit: 1000 
+  });
+
+  // Initialize and Sync Key
+  useEffect(() => {
+    const loadKey = () => {
+        const storedKey = localStorage.getItem('zamanx_api_key');
+        const storedUsage = localStorage.getItem('zamanx_key_usage');
+        
+        if (storedKey) {
+            setGlobalApiKeyState(storedKey);
+            setKeyStatus({ 
+                status: 'active', 
+                usage: storedUsage ? parseInt(storedUsage) : 0, 
+                limit: 1000 
+            });
+            // Ensure service is synced
+            setDynamicApiKey(storedKey);
+        } else {
+            setGlobalApiKeyState('');
+            setKeyStatus({ status: 'missing', usage: 0, limit: 0 });
+            setDynamicApiKey('');
+        }
+    };
+
+    loadKey();
+
+    // Listen for storage events (cross-tab sync)
+    const handleStorageChange = (e: StorageEvent) => {
+        if (e.key === 'zamanx_api_key' || e.key === 'zamanx_key_usage') {
+            loadKey();
+        }
+    };
+
+    // Custom event for same-tab updates
+    const handleLocalKeyUpdate = () => loadKey();
+
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('zamanx-key-update', handleLocalKeyUpdate);
+
+    return () => {
+        window.removeEventListener('storage', handleStorageChange);
+        window.removeEventListener('zamanx-key-update', handleLocalKeyUpdate);
+    };
+  }, []);
+
+  const setGlobalApiKey = (key: string) => {
+      if (key) {
+          localStorage.setItem('zamanx_api_key', key);
+          localStorage.setItem('zamanx_key_created', Date.now().toString());
+          if (!localStorage.getItem('zamanx_key_usage')) {
+              localStorage.setItem('zamanx_key_usage', '0');
+          }
+      } else {
+          localStorage.removeItem('zamanx_api_key');
+          localStorage.removeItem('zamanx_key_usage');
+          localStorage.removeItem('zamanx_key_created');
+      }
+      
+      // Dispatch custom event to trigger update in same tab
+      window.dispatchEvent(new Event('zamanx-key-update'));
+  };
+
+  // --- Firestore Listeners ---
   useEffect(() => {
      const unsubscribeTools = onSnapshot(collection(db, "tools"), (snapshot) => {
-         // Define all tools, including new SaaS ones
          const seedTools: ToolConfig[] = [
              { id: 'CHAT', name: 'AI Chatbot', description: 'Intelligent conversation', category: 'Text', status: 'active', visibility: 'visible', access: 'Free', basePriceUSD: 0, demoAvailable: false },
              { id: 'IMAGE', name: 'Image Generator', description: 'Create stunning art', category: 'Image', status: 'active', visibility: 'visible', access: 'Basic', basePriceUSD: 5, demoAvailable: true },
@@ -82,7 +152,6 @@ export const ToolProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
          if (snapshot.empty) {
              seedTools.forEach(t => setDoc(doc(db, "tools", t.id), t));
          } else {
-             // Merge seed with db to ensure new tools appear if missing
              const dbTools = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ToolConfig));
              seedTools.forEach(seed => {
                  if (!dbTools.find(d => d.id === seed.id)) {
@@ -101,7 +170,6 @@ export const ToolProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
          setNotifications(snap.docs.map(d => ({ id: d.id, ...d.data() } as Notification)));
      });
      
-     // New: Listen for Contact Details
      const unsubscribeContact = onSnapshot(doc(db, "admin_settings", "contact_info"), (doc) => {
          if (doc.exists()) setContactDetails(doc.data() as ContactDetails);
      });
@@ -114,7 +182,7 @@ export const ToolProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
      };
   }, []);
 
-  // ... (State Containers - keeping basic structure to save space, assuming they are initialized) ...
+  // Tool States
   const [chatState, setChatState] = useState({ messages: [], input: '', persona: 'Default' });
   const [imageState, setImageState] = useState({ prompt: '', results: [], style: 'None', aspectRatio: '1:1', count: 1, negativePrompt: '' });
   const [textState, setTextState] = useState({ input: '', output: '', activeTab: 'summarizer', extraInput: '' });
@@ -131,31 +199,10 @@ export const ToolProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [legalState, setLegalState] = useState({ query: '', result: '' });
   const [fitnessState, setFitnessState] = useState({ stats: '', goal: 'Build Muscle', plan: '' });
   const [automationState, setAutomationState] = useState({ activeTab: 'workflow', input: '', output: '' });
-  
-  // WhatsApp State
-  const [whatsappState, setWhatsappState] = useState({
-      isConnected: false,
-      logs: [],
-      settings: {
-          aiEnabled: false,
-          groupsAllowed: false,
-          smartReply: true
-      },
-      activeTab: 'connect'
-  });
+  const [whatsappState, setWhatsappState] = useState({ isConnected: false, logs: [], settings: { aiEnabled: false, groupsAllowed: false, smartReply: true }, activeTab: 'connect' });
+  const [adCreatorState, setAdCreatorState] = useState({ businessName: '', productDesc: '', audience: '', platform: 'Facebook', tone: 'Professional', generatedCopy: '', generatedImage: null as string | null });
 
-  // Ad Creator State
-  const [adCreatorState, setAdCreatorState] = useState({
-      businessName: '',
-      productDesc: '',
-      audience: '',
-      platform: 'Facebook',
-      tone: 'Professional',
-      generatedCopy: '',
-      generatedImage: null as string | null
-  });
-
-  // History Logic
+  // History
   const [history, setHistory] = useState<HistoryItem[]>(() => {
     if (typeof window !== 'undefined') {
         const saved = localStorage.getItem('zamanx_global_history');
@@ -179,6 +226,7 @@ export const ToolProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const value = {
     tools, rates, notifications, contactDetails,
+    globalApiKey, setGlobalApiKey, keyStatus,
     chatState, setChatState,
     imageState, setImageState,
     textState, setTextState,
